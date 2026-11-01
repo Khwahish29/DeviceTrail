@@ -195,13 +195,7 @@ interface and will be implemented and tested later.
 
 **CSE 540 – Team 5**
 
-| Member | Responsibility |
-|--------|----------------|
-| Khwahish Patel | Smart contract development and access control |
-| Prakruti Dangi | Frontend development and blockchain connectivity |
-| Kaushha Trivedi | Hardhat setup and blockchain integration |
-| Meet Patel | Transaction testing, security, and debugging |
-| Harsh Modi | QR-code verification and documentation |
+Khwahish Patel, Prakruti Dangi, Kaushha Trivedi, Meet Patel, Harsh Modi
 
 ## 11. Current Progress and Future Work
 
