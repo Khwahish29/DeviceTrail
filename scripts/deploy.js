@@ -26,7 +26,11 @@ async function main() {
   console.log(out.accounts);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { deploy: main };
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
