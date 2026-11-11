@@ -8,3 +8,4 @@ deployed.json
 backend/storage/
 frontend/dist/
 .DS_Store
+package-lock.json
