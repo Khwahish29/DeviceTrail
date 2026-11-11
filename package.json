@@ -7,7 +7,8 @@
     "test": "hardhat test",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
-    "backend": "node backend/server.js"
+    "backend": "node backend/server.js",
+    "demo": "hardhat run scripts/demo.js --network localhost"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
