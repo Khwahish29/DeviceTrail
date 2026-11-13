@@ -82,7 +82,8 @@ export default function Partners({ wallet, wrongNetwork, connecting, connectErro
             </Notice>
           )}
 
-          {!isManufacturer && (
+          {/* On the wrong network the role cannot be read, so say nothing about it until the network is fixed. */}
+          {!isManufacturer && !wrongNetwork && (
             <section className="panel" aria-labelledby="role-title">
               <h2 id="role-title">Only manufacturers can register devices</h2>
               <p>
