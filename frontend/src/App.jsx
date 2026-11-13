@@ -1,26 +1,36 @@
 import { useCallback, useEffect, useState } from "react";
-import { BrowserProvider, Contract } from "ethers";
+import { BrowserProvider, Contract, ZeroAddress } from "ethers";
 import { ABI, CONTRACT_ADDRESS, HARDHAT_CHAIN_ID, ROLE_NAMES } from "./config.js";
-import ConnectWallet from "./components/ConnectWallet.jsx";
-import RegisterDevice from "./components/RegisterDevice.jsx";
-import LookupDevice from "./components/LookupDevice.jsx";
-import { HowItWorks, Footer } from "./components/Sections.jsx";
-import { Logo } from "./components/ui.jsx";
+import { useRoute } from "./router.js";
+import Header from "./components/Header.jsx";
+import Footer from "./components/Footer.jsx";
+import Home from "./pages/Home.jsx";
+import DeviceReport from "./pages/DeviceReport.jsx";
+import Partners from "./pages/Partners.jsx";
 
 // Hex chain id in the format MetaMask expects for switching networks.
 const HARDHAT_HEX = "0x" + HARDHAT_CHAIN_ID.toString(16);
 
+// Old links like /?id=SN-1001 still work: send them to the report page.
+(function redirectLegacyLink() {
+  const id = new URLSearchParams(window.location.search).get("id");
+  if (id && !window.location.hash) window.location.replace(`${window.location.pathname}#/device/${encodeURIComponent(id)}`);
+})();
+
 export default function App() {
+  const route = useRoute();
   const [wallet, setWallet] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState(null);
-  // Set by the register form or a ?id= link; the lookup card reacts to it.
-  const [requestedId, setRequestedId] = useState(new URLSearchParams(window.location.search).get("id") || "");
+  const [tech, setTech] = useState({}); // developer details for the footer panel: lastError, lastTx, connectionFailed
+  const [techOpen, setTechOpen] = useState(false);
+  const addTech = useCallback((patch) => setTech((t) => ({ ...t, ...patch })), []);
 
+  // Returns true when sign-in worked, so the header link can move on to the partner page.
   const connect = useCallback(async () => {
     if (!window.ethereum) {
-      setConnectError("MetaMask not found. Install the MetaMask extension to register devices.");
-      return;
+      setConnectError("We couldn’t find a wallet in this browser. Install the MetaMask extension, then try again.");
+      return false;
     }
     setConnecting(true);
     setConnectError(null);
@@ -35,17 +45,23 @@ export default function App() {
       let role = "Unknown";
       try {
         role = ROLE_NAMES[Number(await new Contract(CONTRACT_ADDRESS, ABI, provider).getRole(address))];
-      } catch {
-        setConnectError("Could not read your role. Check the network and the contract address in config.js.");
+      } catch (e) {
+        addTech({ lastError: `Could not read the account role: ${e.shortMessage || e.message}` });
       }
       setWallet({ signer, address, chainId: network.chainId, role });
+      setConnecting(false);
+      return true;
     } catch (e) {
-      if (e.code !== "ACTION_REJECTED") setConnectError(e.shortMessage || e.message);
+      if (e.code !== "ACTION_REJECTED") {
+        setConnectError("We couldn’t sign you in. Please try again.");
+        addTech({ lastError: e.shortMessage || e.message });
+      }
     }
     setConnecting(false);
-  }, []);
+    return false;
+  }, [addTech]);
 
-  // Keep the UI right when the user switches account or network inside MetaMask.
+  // Keep the page right when the partner switches account or network inside their wallet.
   useEffect(() => {
     if (!window.ethereum || !wallet) return;
     const refresh = () => connect();
@@ -57,48 +73,67 @@ export default function App() {
     };
   }, [wallet, connect]);
 
+  // Go to the partner page first so progress and any error (for example no wallet installed) are visible there.
+  async function signIn() {
+    if (route.name !== "partners") window.location.hash = "#/partners";
+    await connect();
+  }
+
   async function switchNetwork() {
     try {
       await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: HARDHAT_HEX }] });
-    } catch {
-      setConnectError("Could not switch automatically. Add the network in MetaMask: RPC http://127.0.0.1:8545, chain id 31337.");
+    } catch (e) {
+      setConnectError("We couldn’t switch networks automatically. Switch to the DeviceTrail test network in your wallet, then sign in again.");
+      addTech({ lastError: e.shortMessage || e.message });
     }
   }
 
   const wrongNetwork = Boolean(wallet) && wallet.chainId !== HARDHAT_CHAIN_ID;
+  const routeKey = JSON.stringify(route);
+
+  // Page title and scroll position follow the route, like a normal multi-page site.
+  useEffect(() => {
+    document.title =
+      route.name === "device" ? `Device report ${route.id} | DeviceTrail`
+      : route.name === "partners" ? "For manufacturers | DeviceTrail"
+      : "DeviceTrail | Check a refurbished device before you buy";
+    if (route.name === "home" && route.target) {
+      const el = document.getElementById(route.target === "check" ? "device-id-input" : route.target);
+      el?.scrollIntoView({ block: route.target === "check" ? "center" : "start" });
+      if (route.target === "check") el?.focus({ preventScroll: true });
+    } else {
+      window.scrollTo(0, 0);
+    }
+  }, [routeKey]);
+
+  const needsSetup = CONTRACT_ADDRESS === ZeroAddress || tech.connectionFailed;
+  function showTechnical() {
+    setTechOpen(true);
+    setTimeout(() => document.getElementById("technical")?.scrollIntoView({ block: "center" }), 0);
+  }
 
   return (
     <>
-      <header className="nav">
-        <div className="container nav-inner">
-          <a href="#verify" className="brand"><Logo /> DeviceTrail</a>
-          <nav className="nav-links">
-            <a href="#verify">Verify</a>
-            <a href="#how">How it works</a>
-            <a href="#register">Register</a>
-          </nav>
-          <ConnectWallet wallet={wallet} connecting={connecting} onConnect={connect} onDisconnect={() => setWallet(null)} />
-        </div>
-      </header>
+      <a className="skip" href="#main">Skip to content</a>
+      <Header route={route} wallet={wallet} connecting={connecting} onSignIn={signIn} onSignOut={() => setWallet(null)} />
 
-      {wrongNetwork && (
-        <div className="netbar">
-          <div className="container">
-            <span>You are on chain {wallet.chainId.toString()}. DeviceTrail runs on Hardhat local (chain id 31337).</span>
-            <button className="btn ghost" onClick={switchNetwork}>Switch network</button>
-          </div>
+      {needsSetup && (
+        <div className="setup-banner no-print" role="status">
+          Setup needed: the report service isn’t connected yet.{" "}
+          <button className="text-link" onClick={showTechnical}>Show technical details</button>
         </div>
       )}
-      {connectError && (
-        <div className="container"><div className="banner err">{connectError}</div></div>
-      )}
 
-      <main>
-        <LookupDevice wallet={wallet} requestedId={requestedId} />
-        <HowItWorks />
-        <RegisterDevice wallet={wallet} wrongNetwork={wrongNetwork} onConnect={connect} onRegistered={setRequestedId} />
+      <main id="main">
+        {route.name === "home" && <Home />}
+        {route.name === "device" && <DeviceReport key={route.id} id={route.id} onTech={addTech} />}
+        {route.name === "partners" && (
+          <Partners wallet={wallet} wrongNetwork={wrongNetwork} connecting={connecting} connectError={connectError}
+            onSignIn={connect} onSwitchNetwork={switchNetwork} onTech={addTech} />
+        )}
       </main>
-      <Footer />
+
+      <Footer tech={tech} techOpen={techOpen} onTechToggle={setTechOpen} wallet={wallet} />
     </>
   );
 }
