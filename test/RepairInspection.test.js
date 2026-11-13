@@ -1,279 +1,215 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const {
-  loadFixture,
-  time,
-} = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+const { time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-// Unit tests for the repair and inspection module (contracts/modules/RepairInspection.sol).
-// Runs against RepairInspectionHarness, so it does not depend on the other modules.
+const Role = { None: 0, Manufacturer: 1, Distributor: 2, Refurbisher: 3, Inspector: 4, Retailer: 5 };
+const Status = { Registered: 0, InTransit: 1, Refurbishing: 2, Inspected: 3, AvailableForSale: 4, Sold: 5 };
+const ID = "LAPTOP-SN-001";
 
-// Must match the enum order in IDeviceTrail.
-const Role = {
-  None: 0,
-  Manufacturer: 1,
-  Distributor: 2,
-  Refurbisher: 3,
-  Inspector: 4,
-  Retailer: 5,
-};
-const Status = {
-  Registered: 0,
-  InTransit: 1,
-  Refurbishing: 2,
-  Inspected: 3,
-  AvailableForSale: 4,
-  Sold: 5,
-};
-
-const PRODUCT = "LAPTOP-001";
-// Same hashing as backend/storage.js: sha256 of the report bytes, as bytes32.
+// sha256 of the report bytes, as bytes32.
 const reportHash = (text) => ethers.sha256(ethers.toUtf8Bytes(text));
 
-describe("RepairInspection module", function () {
-  async function deployFixture() {
-    // Same signer order as scripts/deploy.js and test/fixtures.js; index 7 is a second refurbisher.
-    const [admin, manufacturer, distributor, refurbisher, inspector, retailer, outsider, otherRefurbisher] =
+describe("RepairInspection", function () {
+  let mock, admin, manufacturer, distributor, refurbisher, inspector, retailer, outsider, refurbisher2;
+
+  beforeEach(async function () {
+    [admin, manufacturer, distributor, refurbisher, inspector, retailer, outsider, refurbisher2] =
       await ethers.getSigners();
+    mock = await (await ethers.getContractFactory("RepairInspectionMock")).deploy();
+    await mock.assignRole(manufacturer.address, Role.Manufacturer);
+    await mock.assignRole(distributor.address, Role.Distributor);
+    await mock.assignRole(refurbisher.address, Role.Refurbisher);
+    await mock.assignRole(refurbisher2.address, Role.Refurbisher);
+    await mock.assignRole(inspector.address, Role.Inspector);
+    await mock.assignRole(retailer.address, Role.Retailer);
 
-    const Harness = await ethers.getContractFactory("RepairInspectionHarness");
-    const trail = await Harness.deploy();
+    // Device registered, then with the refurbisher and being refurbished.
+    await mock.connect(manufacturer).registerProduct(ID, "ThinkPad X1");
+    await mock.setCustodian(ID, refurbisher.address);
+    await mock.setStatus(ID, Status.Refurbishing);
+  });
 
-    await trail.setRole(manufacturer.address, Role.Manufacturer);
-    await trail.setRole(distributor.address, Role.Distributor);
-    await trail.setRole(refurbisher.address, Role.Refurbisher);
-    await trail.setRole(otherRefurbisher.address, Role.Refurbisher);
-    await trail.setRole(inspector.address, Role.Inspector);
-    await trail.setRole(retailer.address, Role.Retailer);
-
-    // Device is with the refurbisher and being refurbished.
-    await trail.setProduct(PRODUCT, refurbisher.address, Status.Refurbishing);
-
-    return { trail, admin, manufacturer, distributor, refurbisher, otherRefurbisher, inspector, retailer, outsider };
-  }
+  const notRefurbishing = [Status.Registered, Status.InTransit, Status.Inspected, Status.AvailableForSale, Status.Sold];
 
   describe("addRepairRecord", function () {
     it("stores the repair and emits RepairRecorded", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
+      await expect(mock.connect(refurbisher).addRepairRecord(ID, "Replaced battery"))
+        .to.emit(mock, "RepairRecorded")
+        .withArgs(ID, "Replaced battery");
 
-      await expect(trail.connect(refurbisher).addRepairRecord(PRODUCT, "Replaced battery"))
-        .to.emit(trail, "RepairRecorded")
-        .withArgs(PRODUCT, "Replaced battery");
-
-      const history = await trail.getRepairHistory(PRODUCT);
-      expect(history.length).to.equal(1);
-      expect(history[0].description).to.equal("Replaced battery");
-      expect(history[0].refurbisher).to.equal(refurbisher.address);
-      expect(history[0].timestamp).to.equal(await time.latest());
+      const [r] = await mock.getRepairHistory(ID);
+      expect(r.description).to.equal("Replaced battery");
+      expect(r.refurbisher).to.equal(refurbisher.address);
+      expect(r.timestamp).to.equal(await time.latest());
     });
 
-    it("keeps multiple repairs in order", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
-
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Replaced battery");
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Replaced keyboard");
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Upgraded SSD to 1TB");
-
-      expect(await trail.getRepairCount(PRODUCT)).to.equal(3);
-      const history = await trail.getRepairHistory(PRODUCT);
-      expect(history.map((r) => r.description)).to.deep.equal([
-        "Replaced battery",
-        "Replaced keyboard",
-        "Upgraded SSD to 1TB",
-      ]);
+    it("keeps several repairs in order", async function () {
+      for (const d of ["Replaced battery", "Replaced keyboard", "Upgraded SSD"]) {
+        await mock.connect(refurbisher).addRepairRecord(ID, d);
+      }
+      const history = await mock.getRepairHistory(ID);
+      expect(history.map((r) => r.description)).to.deep.equal(["Replaced battery", "Replaced keyboard", "Upgraded SSD"]);
     });
 
-    it("does not change the product status", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Replaced battery");
-      expect((await trail.getProduct(PRODUCT)).status).to.equal(Status.Refurbishing);
+    it("does not change the product's status or custodian", async function () {
+      await mock.connect(refurbisher).addRepairRecord(ID, "Replaced battery");
+      const p = await mock.getProduct(ID);
+      expect(p.status).to.equal(Status.Refurbishing);
+      expect(p.currentCustodian).to.equal(refurbisher.address);
     });
 
-    it("rejects an unknown product", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
-      await expect(trail.connect(refurbisher).addRepairRecord("NOPE-999", "Fix"))
-        .to.be.revertedWithCustomError(trail, "ProductNotFound")
-        .withArgs("NOPE-999");
-    });
-
-    it("rejects a caller without the Refurbisher role", async function () {
-      const { trail, admin, manufacturer, distributor, inspector, retailer, outsider } =
-        await loadFixture(deployFixture);
-
+    it("rejects every role other than Refurbisher, even the custodian", async function () {
       for (const signer of [admin, manufacturer, distributor, inspector, retailer, outsider]) {
-        await expect(trail.connect(signer).addRepairRecord(PRODUCT, "Fake repair"))
-          .to.be.revertedWithCustomError(trail, "NotRefurbisher")
-          .withArgs(signer.address);
+        await mock.setCustodian(ID, signer.address);
+        await expect(mock.connect(signer).addRepairRecord(ID, "Fake repair")).to.be.revertedWith(
+          "Caller has the wrong role"
+        );
       }
     });
 
-    it("rejects a refurbisher who does not hold custody", async function () {
-      const { trail, refurbisher, otherRefurbisher } = await loadFixture(deployFixture);
-      await expect(trail.connect(otherRefurbisher).addRepairRecord(PRODUCT, "Fix"))
-        .to.be.revertedWithCustomError(trail, "NotCustodian")
-        .withArgs(otherRefurbisher.address, refurbisher.address);
+    it("rejects a refurbisher who does not hold the device", async function () {
+      await expect(mock.connect(refurbisher2).addRepairRecord(ID, "Fake repair")).to.be.revertedWith(
+        "Only the current custodian"
+      );
     });
 
-    it("rejects repairs when the product is not in Refurbishing", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
+    it("rejects a refurbisher whose role was removed", async function () {
+      await mock.assignRole(refurbisher.address, Role.None);
+      await expect(mock.connect(refurbisher).addRepairRecord(ID, "Fix")).to.be.revertedWith(
+        "Caller has the wrong role"
+      );
+    });
 
-      for (const status of [
-        Status.Registered,
-        Status.InTransit,
-        Status.Inspected,
-        Status.AvailableForSale,
-        Status.Sold,
-      ]) {
-        await trail.setProduct(PRODUCT, refurbisher.address, status);
-        await expect(trail.connect(refurbisher).addRepairRecord(PRODUCT, "Fix"))
-          .to.be.revertedWithCustomError(trail, "InvalidStatusForRepair")
-          .withArgs(status);
+    it("rejects repairs unless the product is being refurbished", async function () {
+      for (const s of notRefurbishing) {
+        await mock.setStatus(ID, s);
+        await expect(mock.connect(refurbisher).addRepairRecord(ID, "Fix")).to.be.revertedWith(
+          "Product is not being refurbished"
+        );
       }
     });
 
     it("rejects an empty description", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
-      await expect(
-        trail.connect(refurbisher).addRepairRecord(PRODUCT, "")
-      ).to.be.revertedWithCustomError(trail, "EmptyRepairDescription");
+      await expect(mock.connect(refurbisher).addRepairRecord(ID, "")).to.be.revertedWith("Empty repair description");
+    });
+
+    it("rejects an unknown product", async function () {
+      await expect(mock.connect(refurbisher).addRepairRecord("NOPE", "Fix")).to.be.revertedWith("Product not found");
     });
 
     it("keeps histories separate per product", async function () {
-      const { trail, refurbisher } = await loadFixture(deployFixture);
-      await trail.setProduct("LAPTOP-002", refurbisher.address, Status.Refurbishing);
+      await mock.connect(manufacturer).registerProduct("LAPTOP-SN-002", "Dell XPS");
+      await mock.setCustodian("LAPTOP-SN-002", refurbisher.address);
+      await mock.setStatus("LAPTOP-SN-002", Status.Refurbishing);
 
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Replaced battery");
-      await trail.connect(refurbisher).addRepairRecord("LAPTOP-002", "Replaced screen");
+      await mock.connect(refurbisher).addRepairRecord(ID, "Replaced battery");
+      await mock.connect(refurbisher).addRepairRecord("LAPTOP-SN-002", "Replaced screen");
 
-      expect(await trail.getRepairCount(PRODUCT)).to.equal(1);
-      expect(await trail.getRepairCount("LAPTOP-002")).to.equal(1);
-      expect((await trail.getRepairHistory("LAPTOP-002"))[0].description).to.equal(
-        "Replaced screen"
-      );
+      expect((await mock.getRepairHistory(ID)).map((r) => r.description)).to.deep.equal(["Replaced battery"]);
+      expect((await mock.getRepairHistory("LAPTOP-SN-002")).map((r) => r.description)).to.deep.equal([
+        "Replaced screen",
+      ]);
     });
   });
 
   describe("certifyInspection", function () {
-    it("records the inspection and emits InspectionCertified", async function () {
-      const { trail, inspector } = await loadFixture(deployFixture);
-      const hash = reportHash("inspection report v1");
+    it("stores the inspection and emits InspectionCertified", async function () {
+      const hash = reportHash("report v1");
+      await expect(mock.connect(inspector).certifyInspection(ID, hash))
+        .to.emit(mock, "InspectionCertified")
+        .withArgs(ID, inspector.address, hash);
 
-      await expect(trail.connect(inspector).certifyInspection(PRODUCT, hash))
-        .to.emit(trail, "InspectionCertified")
-        .withArgs(PRODUCT, inspector.address, hash);
-
-      expect(await trail.isInspected(PRODUCT)).to.equal(true);
-
-      const inspections = await trail.getInspections(PRODUCT);
-      expect(inspections.length).to.equal(1);
-      expect(inspections[0].reportHash).to.equal(hash);
-      expect(inspections[0].inspector).to.equal(inspector.address);
-      expect(inspections[0].timestamp).to.equal(await time.latest());
+      const [i] = await mock.getInspections(ID);
+      expect(i.reportHash).to.equal(hash);
+      expect(i.inspector).to.equal(inspector.address);
+      expect(i.timestamp).to.equal(await time.latest());
+      expect(await mock.isInspected(ID)).to.equal(true);
     });
 
-    it("does not change the product status (that is updateStatus's job)", async function () {
-      const { trail, inspector } = await loadFixture(deployFixture);
-      await expect(trail.connect(inspector).certifyInspection(PRODUCT, reportHash("r"))).to.not.emit(
-        trail,
-        "StatusUpdated"
+    it("does not change the status (that is updateStatus's job)", async function () {
+      await expect(mock.connect(inspector).certifyInspection(ID, reportHash("r"))).to.not.emit(mock, "StatusUpdated");
+      expect((await mock.getProduct(ID)).status).to.equal(Status.Refurbishing);
+    });
+
+    it("does not require the inspector to hold the device", async function () {
+      expect((await mock.getProduct(ID)).currentCustodian).to.equal(refurbisher.address);
+      await expect(mock.connect(inspector).certifyInspection(ID, reportHash("r"))).to.not.be.reverted;
+    });
+
+    it("rejects every role other than Inspector", async function () {
+      for (const signer of [admin, manufacturer, distributor, refurbisher, retailer, outsider]) {
+        await expect(mock.connect(signer).certifyInspection(ID, reportHash("r"))).to.be.revertedWith(
+          "Caller has the wrong role"
+        );
+      }
+    });
+
+    it("rejects inspection unless the product is being refurbished", async function () {
+      for (const s of notRefurbishing) {
+        await mock.setStatus(ID, s);
+        await expect(mock.connect(inspector).certifyInspection(ID, reportHash("r"))).to.be.revertedWith(
+          "Product is not being refurbished"
+        );
+      }
+    });
+
+    it("rejects a zero hash", async function () {
+      await expect(mock.connect(inspector).certifyInspection(ID, ethers.ZeroHash)).to.be.revertedWith(
+        "Empty report hash"
       );
-      expect((await trail.getProduct(PRODUCT)).status).to.equal(Status.Refurbishing);
     });
 
-    it("does not require the inspector to hold custody", async function () {
-      const { trail, refurbisher, inspector } = await loadFixture(deployFixture);
-      expect((await trail.getProduct(PRODUCT)).currentCustodian).to.equal(refurbisher.address);
-      await expect(trail.connect(inspector).certifyInspection(PRODUCT, reportHash("r"))).to.not
-        .be.reverted;
+    it("rejects the same report twice, on the same or another product", async function () {
+      await mock.connect(manufacturer).registerProduct("LAPTOP-SN-002", "Dell XPS");
+      await mock.setStatus("LAPTOP-SN-002", Status.Refurbishing);
+      const hash = reportHash("one report");
+
+      await mock.connect(inspector).certifyInspection(ID, hash);
+      await expect(mock.connect(inspector).certifyInspection(ID, hash)).to.be.revertedWith("Report already certified");
+      await expect(mock.connect(inspector).certifyInspection("LAPTOP-SN-002", hash)).to.be.revertedWith(
+        "Report already certified"
+      );
     });
 
     it("rejects an unknown product", async function () {
-      const { trail, inspector } = await loadFixture(deployFixture);
-      await expect(trail.connect(inspector).certifyInspection("NOPE-999", reportHash("r")))
-        .to.be.revertedWithCustomError(trail, "ProductNotFound")
-        .withArgs("NOPE-999");
+      await expect(mock.connect(inspector).certifyInspection("NOPE", reportHash("r"))).to.be.revertedWith(
+        "Product not found"
+      );
     });
 
-    it("rejects a caller without the Inspector role", async function () {
-      const { trail, admin, manufacturer, distributor, refurbisher, retailer, outsider } =
-        await loadFixture(deployFixture);
+    it("keeps a re-inspection after more repairs", async function () {
+      await mock.connect(inspector).certifyInspection(ID, reportHash("first"));
+      await mock.connect(refurbisher).addRepairRecord(ID, "Fixed hinge found in inspection");
+      await mock.connect(inspector).certifyInspection(ID, reportHash("second"));
 
-      for (const signer of [admin, manufacturer, distributor, refurbisher, retailer, outsider]) {
-        await expect(trail.connect(signer).certifyInspection(PRODUCT, reportHash("r")))
-          .to.be.revertedWithCustomError(trail, "NotInspector")
-          .withArgs(signer.address);
-      }
-    });
-
-    it("rejects inspection when the product is not in Refurbishing", async function () {
-      const { trail, refurbisher, inspector } = await loadFixture(deployFixture);
-
-      for (const status of [
-        Status.Registered,
-        Status.InTransit,
-        Status.Inspected,
-        Status.AvailableForSale,
-        Status.Sold,
-      ]) {
-        await trail.setProduct(PRODUCT, refurbisher.address, status);
-        await expect(trail.connect(inspector).certifyInspection(PRODUCT, reportHash("r")))
-          .to.be.revertedWithCustomError(trail, "InvalidStatusForInspection")
-          .withArgs(status);
-      }
-    });
-
-    it("rejects a zero report hash", async function () {
-      const { trail, inspector } = await loadFixture(deployFixture);
-      await expect(
-        trail.connect(inspector).certifyInspection(PRODUCT, ethers.ZeroHash)
-      ).to.be.revertedWithCustomError(trail, "EmptyReportHash");
-    });
-
-    it("rejects reusing a report hash on another product", async function () {
-      const { trail, refurbisher, inspector } = await loadFixture(deployFixture);
-      await trail.setProduct("LAPTOP-002", refurbisher.address, Status.Refurbishing);
-      const hash = reportHash("one report");
-
-      await trail.connect(inspector).certifyInspection(PRODUCT, hash);
-      await expect(trail.connect(inspector).certifyInspection("LAPTOP-002", hash))
-        .to.be.revertedWithCustomError(trail, "ReportHashAlreadyUsed")
-        .withArgs(hash);
-    });
-
-    it("allows a re-inspection after more repairs, keeping both", async function () {
-      const { trail, refurbisher, inspector } = await loadFixture(deployFixture);
-
-      await trail.connect(inspector).certifyInspection(PRODUCT, reportHash("first"));
-      await trail.connect(refurbisher).addRepairRecord(PRODUCT, "Fixed hinge found in inspection");
-      await trail.connect(inspector).certifyInspection(PRODUCT, reportHash("second"));
-
-      const inspections = await trail.getInspections(PRODUCT);
-      expect(inspections.length).to.equal(2);
-      expect(inspections[1].reportHash).to.equal(reportHash("second"));
+      const list = await mock.getInspections(ID);
+      expect(list.map((i) => i.reportHash)).to.deep.equal([reportHash("first"), reportHash("second")]);
     });
   });
 
-  describe("verifyInspectionReport", function () {
-    it("returns true only for a hash certified for that product", async function () {
-      const { trail, refurbisher, inspector } = await loadFixture(deployFixture);
-      await trail.setProduct("LAPTOP-002", refurbisher.address, Status.Refurbishing);
+  describe("read-only views", function () {
+    it("verifyInspectionReport is true only for a hash certified for that product", async function () {
+      await mock.connect(manufacturer).registerProduct("LAPTOP-SN-002", "Dell XPS");
       const hash = reportHash("genuine report");
+      await mock.connect(inspector).certifyInspection(ID, hash);
 
-      await trail.connect(inspector).certifyInspection(PRODUCT, hash);
-
-      expect(await trail.verifyInspectionReport(PRODUCT, hash)).to.equal(true);
-      expect(await trail.verifyInspectionReport(PRODUCT, reportHash("tampered report"))).to.equal(
-        false
-      );
-      expect(await trail.verifyInspectionReport("LAPTOP-002", hash)).to.equal(false);
+      expect(await mock.verifyInspectionReport(ID, hash)).to.equal(true);
+      expect(await mock.verifyInspectionReport(ID, reportHash("tampered report"))).to.equal(false);
+      expect(await mock.verifyInspectionReport("LAPTOP-SN-002", hash)).to.equal(false);
     });
 
-    it("returns empty results for a product with no history", async function () {
-      const { trail } = await loadFixture(deployFixture);
-      expect(await trail.isInspected(PRODUCT)).to.equal(false);
-      expect(await trail.getRepairCount(PRODUCT)).to.equal(0);
-      expect((await trail.getRepairHistory(PRODUCT)).length).to.equal(0);
-      expect((await trail.getInspections(PRODUCT)).length).to.equal(0);
+    it("return empty results for a product with no repairs or inspections", async function () {
+      expect(await mock.getRepairHistory(ID)).to.deep.equal([]);
+      expect(await mock.getInspections(ID)).to.deep.equal([]);
+      expect(await mock.isInspected(ID)).to.equal(false);
+      expect(await mock.verifyInspectionReport(ID, reportHash("r"))).to.equal(false);
+    });
+
+    it("revert for an unknown product", async function () {
+      await expect(mock.getRepairHistory("NOPE")).to.be.revertedWith("Product not found");
+      await expect(mock.getInspections("NOPE")).to.be.revertedWith("Product not found");
+      await expect(mock.isInspected("NOPE")).to.be.revertedWith("Product not found");
+      await expect(mock.verifyInspectionReport("NOPE", reportHash("r"))).to.be.revertedWith("Product not found");
     });
   });
 });
