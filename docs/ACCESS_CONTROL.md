@@ -16,14 +16,9 @@ The roles are the `Role` enum in `IDeviceTrail`: None, Manufacturer, Distributor
 
 ## How the other modules use it
 
-Every module is an abstract contract that inherits the roles module, so it can use `onlyRole` on its own functions:
+The other modules can use the `onlyRole` modifier from the roles module to restrict their functions to one role.
 
-```solidity
-abstract contract ProductRegistration is AccessControl {
-    function registerProduct(string calldata productId, string calldata model)
-        external onlyRole(Role.Manufacturer) { /* ... */ }
-}
-```
+For the real product registration module and its shared storage, see `docs/PRODUCT_REGISTRATION.md`.
 
 ## The final contract (`contracts/DeviceTrailImpl.sol`)
 
