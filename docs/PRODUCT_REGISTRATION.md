@@ -36,6 +36,12 @@ abstract contract CustodyTransfer is ProductRegistration {
 
 `DeviceTrailImpl.sol` needs no change: Solidity merges the shared base automatically.
 
+Rules for the other modules:
+
+- Do not declare your own `products`, `_key` or `_load`, and do not implement `registerProduct` or `getProduct`.
+- In a test mock, do not stub `registerProduct` or `getProduct` (they come from this module). Stub only the interface functions that neither your module nor this one implements.
+- In tests, have the Manufacturer register a product first, otherwise every call reverts with "Product not found".
+
 ## Tests
 
 `test/ProductRegistration.test.js` tests the module through `contracts/mocks/ProductRegistrationMock.sol`, a test-only contract with empty stubs for the functions that other modules implement.
