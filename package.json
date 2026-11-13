@@ -1,0 +1,15 @@
+{
+  "name": "devicetrail",
+  "version": "0.1.0",
+  "description": "DeviceTrail: blockchain-based provenance for refurbished electronics (CSE 540, Team 5)",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  }
+}

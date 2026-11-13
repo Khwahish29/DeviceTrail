@@ -1,0 +1,10 @@
+node_modules/
+artifacts/
+cache/
+typechain-types/
+coverage/
+.env
+deployed.json
+frontend/dist/
+.DS_Store
+package-lock.json
