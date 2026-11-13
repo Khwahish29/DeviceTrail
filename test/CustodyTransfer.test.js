@@ -14,7 +14,8 @@ describe("CustodyTransfer", function () {
     await mock.assignRole(distributor.address, Role.Distributor);
     await mock.assignRole(refurbisher.address, Role.Refurbisher);
     await mock.assignRole(retailer.address, Role.Retailer);
-    await mock.addProduct(ID, manufacturer.address);
+    // Registered through the real registration module, so the manufacturer is the first custodian.
+    await mock.connect(manufacturer).registerProduct(ID, "ThinkPad X1");
   });
 
   const custodian = async () => (await mock.getProduct(ID)).currentCustodian;
@@ -48,7 +49,7 @@ describe("CustodyTransfer", function () {
     });
 
     it("only changes the product that was transferred", async function () {
-      await mock.addProduct("PHONE-SN-002", manufacturer.address);
+      await mock.connect(manufacturer).registerProduct("PHONE-SN-002", "Pixel 8");
       await mock.connect(manufacturer).transferCustody(ID, distributor.address);
       expect((await mock.getProduct("PHONE-SN-002")).currentCustodian).to.equal(manufacturer.address);
     });

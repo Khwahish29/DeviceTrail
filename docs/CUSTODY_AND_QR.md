@@ -2,7 +2,7 @@
 
 ## The custody module (`contracts/CustodyTransfer.sol`)
 
-`abstract contract CustodyTransfer is AccessControl`, inherited by the final `DeviceTrail` contract.
+`abstract contract CustodyTransfer is ProductRegistration`, inherited by the final `DeviceTrail` contract. It builds on the registration module (which builds on `AccessControl`), so it can use `getRole` and the shared product storage.
 
 `transferCustody(productId, newCustodian)` moves a product to the next stakeholder and emits `CustodyTransferred(productId, from, to)`. It reverts with:
 
@@ -17,21 +17,13 @@
 
 Any role can receive a product. This module does not check the lifecycle status.
 
-### Hooks the product module must implement
+### How it reads and updates products
 
-Products are stored by the product registration module, so this module reads and writes them through three internal hooks. The module that owns the product mapping (or the final contract) implements them:
-
-```solidity
-function _productExists(string memory productId) internal view virtual returns (bool);
-function _custodianOf(string memory productId) internal view virtual returns (address);
-function _setCustodian(string memory productId, address newCustodian) internal virtual;
-```
-
-`_productExists` and `_custodianOf` have the same names and signatures as the hooks in the repair and inspection module, so one implementation can serve both.
+Products live in the registration module's shared storage (`docs/PRODUCT_REGISTRATION.md`). The module loads the product with `_load(productId)`, which reverts with `Product not found` for an unknown ID, and writes the new holder straight to `currentCustodian` in storage.
 
 ### Tests
 
-`test/CustodyTransfer.test.js` (12 tests) runs the module through `contracts/mocks/CustodyTransferMock.sol`, a test-only contract that stores products in a simple mapping.
+`test/CustodyTransfer.test.js` (12 tests) runs the module through `contracts/mocks/CustodyTransferMock.sol`, a test-only contract that stubs only the functions no module implements yet. Each test registers its device through the Manufacturer with `registerProduct` first.
 
 ## QR codes (`qr/generate.js`)
 
