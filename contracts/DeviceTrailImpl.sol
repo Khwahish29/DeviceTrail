@@ -12,6 +12,6 @@ contract DeviceTrail is
     AccessControl,
     ProductRegistration,
     CustodyTransfer,
-    LifecycleStatus,
-    RepairInspection
+    RepairInspection,
+    LifecycleStatus
 {}
