@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeviceTrail · Verify a device</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #667085; --line: #e4e7ec;
+      --accent: #2f6fed; --ok: #127a4b; --ok-bg: #e7f6ee; --err: #b42318; --err-bg: #fdecea;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 20px; }
+    form { display: flex; gap: 8px; margin-bottom: 20px; }
+    input { flex: 1; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; }
+    button { padding: 10px 16px; font: inherit; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .card h2 { font-size: 1rem; margin: 0 0 12px; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--ok-bg); color: var(--ok); font-weight: 600; font-size: .9rem; }
+    .msg { padding: 12px 14px; border-radius: 8px; background: var(--err-bg); color: var(--err); }
+    .muted { color: var(--muted); }
+    ol { list-style: none; margin: 0; padding: 0; }
+    li { position: relative; padding: 0 0 16px 22px; border-left: 2px solid var(--line); margin-left: 6px; }
+    li:last-child { border-left-color: transparent; padding-bottom: 0; }
+    li::before { content: ""; position: absolute; left: -7px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+    .when { color: var(--muted); font-size: .85rem; }
+    .what { font-weight: 600; }
+    .detail { font-size: .92rem; overflow-wrap: anywhere; }
+    code { font-size: .85em; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Verify a device</h1>
+  <p class="sub">Read-only record from the DeviceTrail blockchain. No wallet needed.</p>
+
+  <form id="lookup">
+    <input id="productId" placeholder="Product ID, e.g. LAPTOP-SN-001" autocomplete="off" required>
+    <button type="submit">Verify</button>
+  </form>
+
+  <p id="status" class="muted" hidden></p>
+  <div id="error" class="msg" hidden></div>
+
+  <section id="product" class="card" hidden>
+    <h2>Current record</h2>
+    <dl>
+      <dt>Product ID</dt><dd id="p-id"></dd>
+      <dt>Model</dt><dd id="p-model"></dd>
+      <dt>Status</dt><dd><span id="p-status" class="badge"></span></dd>
+      <dt>Held by</dt><dd id="p-custodian"></dd>
+    </dl>
+  </section>
+
+  <section id="history" class="card" hidden>
+    <h2>History</h2>
+    <ol id="timeline"></ol>
+  </section>
+</main>
+
+<script type="module">
+  import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.min.js";
+
+  // Only the read functions and events from IDeviceTrail, so the page does not depend on build output.
+  const ABI = [
+    "function getProduct(string productId) view returns (tuple(string productId, string model, address currentCustodian, uint8 status, bool exists))",
+    "function getRole(address stakeholder) view returns (uint8)",
+    "event ProductRegistered(string productId, address manufacturer)",
+    "event CustodyTransferred(string productId, address from, address to)",
+    "event RepairRecorded(string productId, string repairDescription)",
+    "event StatusUpdated(string productId, uint8 newStatus)",
+    "event InspectionCertified(string productId, address inspector, bytes32 reportHash)",
+  ];
+  const STATUS = ["Registered", "In transit", "Refurbishing", "Inspected", "Available for sale", "Sold"];
+  const ROLE = ["No role", "Manufacturer", "Distributor", "Refurbisher", "Inspector", "Retailer"];
+
+  const params = new URLSearchParams(location.search);
+  // Default RPC is the Hardhat node on the same machine that serves this page,
+  // so it also works from a phone on the same Wi-Fi.
+  const RPC = params.get("rpc") || `http://${location.hostname}:8545`;
+  const $ = (id) => document.getElementById(id);
+
+  let contractPromise;
+  async function getContract() {
+    contractPromise ??= (async () => {
+      let address = params.get("contract");
+      if (!address) {
+        const res = await fetch("/deployed.json");
+        if (!res.ok) throw new Error(
+          "Contract address not found. Run npm run deploy:local, or add &contract=<address> to the end of this page's URL.");
+        address = (await res.json()).contract;
+      }
+      const provider = new ethers.JsonRpcProvider(RPC, undefined, { staticNetwork: true });
+      return new ethers.Contract(address, ABI, provider);
+    })();
+    return contractPromise.catch((e) => { contractPromise = undefined; throw e; });
+  }
+
+  const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+  const roleCache = new Map();
+  async function who(contract, address) {
+    if (!roleCache.has(address)) roleCache.set(address, contract.getRole(address).then(Number).catch(() => 0));
+    return `${ROLE[await roleCache.get(address)] ?? "Unknown"} (${short(address)})`;
+  }
+
+  function show(id, on) { $(id).hidden = !on; }
+  function setText(id, text) { $(id).textContent = text; }
+
+  async function describe(contract, e) {
+    const a = e.args;
+    switch (e.eventName) {
+      case "ProductRegistered":   return ["Registered", `by ${await who(contract, a.manufacturer)}`];
+      case "CustodyTransferred":  return ["Custody transferred", `${await who(contract, a.from)} → ${await who(contract, a.to)}`];
+      case "RepairRecorded":      return ["Repair recorded", a.repairDescription];
+      case "StatusUpdated":       return [`Status: ${STATUS[Number(a.newStatus)] ?? a.newStatus}`, ""];
+      case "InspectionCertified": return ["Inspection certified", `by ${await who(contract, a.inspector)} · report hash ${a.reportHash}`];
+    }
+  }
+
+  async function loadHistory(contract, productId) {
+    const names = ["ProductRegistered", "CustodyTransferred", "RepairRecorded", "StatusUpdated", "InspectionCertified"];
+    // productId is not an indexed event field, so fetch each event type and filter here.
+    const all = (await Promise.all(names.map((n) => contract.queryFilter(contract.filters[n]())))).flat()
+      .filter((e) => e.args.productId === productId)
+      .sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
+
+    const blocks = new Map();
+    const timeOf = async (n) => {
+      if (!blocks.has(n)) blocks.set(n, contract.runner.getBlock(n));
+      return new Date(Number((await blocks.get(n)).timestamp) * 1000);
+    };
+
+    const list = $("timeline");
+    list.replaceChildren();
+    for (const e of all) {
+      const [what, detail] = await describe(contract, e);
+      const li = document.createElement("li");
+      const when = document.createElement("div");
+      when.className = "when";
+      when.textContent = (await timeOf(e.blockNumber)).toLocaleString();
+      const title = document.createElement("div");
+      title.className = "what";
+      title.textContent = what;
+      li.append(when, title);
+      if (detail) {
+        const d = document.createElement("div");
+        d.className = "detail";
+        d.textContent = detail;
+        li.append(d);
+      }
+      list.append(li);
+    }
+    show("history", all.length > 0);
+  }
+
+  async function verify(productId) {
+    show("error", false); show("product", false); show("history", false);
+    setText("status", "Looking up…"); show("status", true);
+    try {
+      const contract = await getContract();
+      let p;
+      try {
+        p = await contract.getProduct(productId);
+      } catch (e) {
+        if (e.code === "CALL_EXCEPTION") throw new Error(`No device with ID "${productId}" is registered.`);
+        throw e;
+      }
+      if (!p.exists) throw new Error(`No device with ID "${productId}" is registered.`);
+
+      setText("p-id", p.productId);
+      setText("p-model", p.model);
+      setText("p-status", STATUS[Number(p.status)] ?? `Unknown (${p.status})`);
+      setText("p-custodian", await who(contract, p.currentCustodian));
+      show("product", true);
+
+      await loadHistory(contract, productId);
+      show("status", false);
+    } catch (e) {
+      show("status", false);
+      const offline = e.code === "NETWORK_ERROR" || /fetch|ECONNREFUSED/i.test(e.message);
+      setText("error", offline ? `Can't reach the blockchain node at ${RPC}. Is "npm run node" running?` : e.message);
+      show("error", true);
+    }
+  }
+
+  $("lookup").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const id = $("productId").value.trim();
+    history.replaceState(null, "", `?${new URLSearchParams({ ...Object.fromEntries(params), productId: id })}`);
+    verify(id);
+  });
+
+  const initial = params.get("productId");
+  if (initial) { $("productId").value = initial; verify(initial); }
+</script>
+</body>
+</html>
