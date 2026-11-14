@@ -6,10 +6,16 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "node": "hardhat node",
-    "deploy:local": "hardhat run scripts/deploy.js --network localhost"
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "qr": "node qr/generate.js",
+    "verify-page": "node qr/serve.js",
+    "test:qr": "node --test qr/generate.test.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }
