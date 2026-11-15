@@ -19,6 +19,7 @@ export default function Footer({ tech, techOpen, onTechToggle, wallet }) {
           <a href="#/how">How it works</a>
           <a href="#/sample">Sample report</a>
           <a href="#/faq">Questions</a>
+          <a href="#/demo">Live demo</a>
         </nav>
         <nav className="footer-col" aria-label="For manufacturers">
           <h2>For manufacturers</h2>

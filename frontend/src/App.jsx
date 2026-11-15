@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrowserProvider, Contract, ZeroAddress } from "ethers";
 import { ABI, CONTRACT_ADDRESS, HARDHAT_CHAIN_ID, ROLE_NAMES } from "./config.js";
-import { useRoute } from "./router.js";
+import { deviceHref, idFromQuery, useRoute } from "./router.js";
 import Header from "./components/Header.jsx";
 import Footer from "./components/Footer.jsx";
 import Home from "./pages/Home.jsx";
 import DeviceReport from "./pages/DeviceReport.jsx";
 import Partners from "./pages/Partners.jsx";
+import Demo from "./pages/Demo.jsx";
 
 // Hex chain id in the format MetaMask expects for switching networks.
 const HARDHAT_HEX = "0x" + HARDHAT_CHAIN_ID.toString(16);
 
-// Old links like /?id=SN-1001 still work: send them to the report page.
-(function redirectLegacyLink() {
-  const id = new URLSearchParams(window.location.search).get("id");
-  if (id && !window.location.hash) window.location.replace(`${window.location.pathname}#/device/${encodeURIComponent(id)}`);
+// QR links (/?productId=SN-1001) and old links (/?id=SN-1001) land on the device report.
+(function redirectLink() {
+  const id = idFromQuery(window.location.search);
+  if (id && !window.location.hash) window.location.replace(`${window.location.pathname}${deviceHref(id)}`);
 })();
 
 export default function App() {
@@ -96,6 +97,7 @@ export default function App() {
     document.title =
       route.name === "device" ? `Device report ${route.id} | DeviceTrail`
       : route.name === "partners" ? "For manufacturers | DeviceTrail"
+      : route.name === "demo" ? "Live demo | DeviceTrail"
       : "DeviceTrail | Check a refurbished device before you buy";
     if (route.name === "home" && route.target) {
       const el = document.getElementById(route.target === "check" ? "device-id-input" : route.target);
@@ -127,6 +129,7 @@ export default function App() {
       <main id="main">
         {route.name === "home" && <Home />}
         {route.name === "device" && <DeviceReport key={route.id} id={route.id} onTech={addTech} />}
+        {route.name === "demo" && <Demo />}
         {route.name === "partners" && (
           <Partners wallet={wallet} wrongNetwork={wrongNetwork} connecting={connecting} connectError={connectError}
             onSignIn={connect} onSwitchNetwork={switchNetwork} onTech={addTech} />

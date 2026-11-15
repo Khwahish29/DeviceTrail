@@ -1,9 +1,8 @@
 import { HeroArt } from "../components/Brand.jsx";
 import ReportView from "../components/ReportView.jsx";
 import SearchBox from "../components/SearchBox.jsx";
-
-// Clearly labelled sample data. It exists only to show what a report looks like and is never read from the records.
-const SAMPLE = { id: "SAMPLE-0001", model: "Sample laptop 14\"", holder: "0x1234567890abcdef1234567890abcdef1234abcd", holderRole: "Retailer", status: 4 };
+import CheckReport from "../components/CheckReport.jsx";
+import { SAMPLE_DEVICE, SAMPLE_PARTS } from "../sampleReport.js";
 
 const STEPS = [
   ["Find the device ID", "It is printed on the label on the device, and it is also in the QR code."],
@@ -15,6 +14,11 @@ const GUIDE = [
   ["Status", "The stage the device is in right now, in plain words."],
   ["Journey so far", "Stages the device has already passed are filled in. The highlighted one is where it is now."],
   ["Currently held by", "The kind of company that has the device at the moment, such as a retailer."],
+  ["Repairs", "Each repair that was recorded, what was done and which kind of company did it."],
+  ["Inspections", "Whether an independent inspector certified the device, and the ID of their report."],
+  ["Check a report", "If you were given an inspection report file, choose it here to see whether it matches the record."],
+  ["History", "Everything that was recorded about the device, in order, written in plain words."],
+  ["Share this report", "A QR code that opens the report on a phone. It can be printed for the device label."],
   ["Report checked", "The date and time you looked, so you know how fresh the report is."],
 ];
 
@@ -46,7 +50,7 @@ export default function Home() {
             <p>Every report has the same sections. This one is a sample, so you know what to look for.</p>
           </div>
           <div className="sample-grid">
-            <ReportView device={SAMPLE} sample />
+            <ReportView device={SAMPLE_DEVICE} sample {...SAMPLE_PARTS} check={<CheckReport sample inspections={SAMPLE_PARTS.inspections} />} share={<p className="muted">A QR code for the device appears here. Scan it with a phone to open the report, or print it for the device label.</p>} />
             <aside className="guide" aria-labelledby="guide-title">
               <h3 id="guide-title">How to read it</h3>
               <dl>

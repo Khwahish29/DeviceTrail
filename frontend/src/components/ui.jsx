@@ -48,3 +48,14 @@ export function CopyButton({ text, label }) {
     </button>
   );
 }
+
+// "a Manufacturer", "an Inspector": company types read better in a sentence with an article.
+export const withArticle = (type) => (/^[aeiou]/i.test(type) ? "an " : "a ") + type;
+
+// What we call a holder whose role was removed or can't be read.
+export const UNLISTED = "unlisted company";
+export const article = (type) => (type === UNLISTED ? `an ${UNLISTED}` : withArticle(type));
+
+// Dates from the records are real Date objects; the sample report uses plain text such as "Sample date".
+export const whenText = (w) =>
+  w instanceof Date ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(w) : w || "";

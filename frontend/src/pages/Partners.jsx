@@ -6,6 +6,9 @@ import { CheckIcon, Notice, Spinner } from "../components/ui.jsx";
 
 const STEPS = ["Confirm in your wallet", "Saving", "Done"];
 
+// The QR generator accepts only these characters, so IDs that use anything else could never get a QR code.
+const VALID_ID = /^[A-Za-z0-9._-]{1,64}$/;
+
 // Turns a wallet or contract failure into one plain sentence that says what to do next.
 function explain(err, id) {
   if (err.code === "ACTION_REJECTED") return { kind: "info", text: "You cancelled in your wallet, so nothing was saved." };
@@ -26,7 +29,9 @@ export default function Partners({ wallet, wrongNetwork, connecting, connectErro
 
   const isManufacturer = wallet?.role === "Manufacturer";
   const busy = tx && tx.step < 2;
-  const ready = deviceId.trim() && model.trim();
+  const idOk = VALID_ID.test(deviceId.trim());
+  const idProblem = deviceId.trim() !== "" && !idOk;
+  const ready = idOk && model.trim();
 
   async function submit(e) {
     e.preventDefault();
@@ -103,8 +108,12 @@ export default function Partners({ wallet, wrongNetwork, connecting, connectErro
               <form onSubmit={submit} noValidate>
                 <div className="field">
                   <label htmlFor={idField}>Device ID</label>
-                  <input id={idField} className="input id-input has-value" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="e.g. SN-1001" disabled={busy} autoComplete="off" spellCheck="false" />
-                  <p className="help">Must be unique. It is printed on the device label and cannot be changed later.</p>
+                  <input id={idField} className="input id-input has-value" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="e.g. SN-1001" disabled={busy} autoComplete="off" spellCheck="false" aria-invalid={idProblem} aria-describedby={`${idField}-help`} />
+                  <p id={`${idField}-help`} className={`help ${idProblem ? "problem-text" : ""}`}>
+                    {idProblem
+                      ? "Use only letters, digits, “.”, “_” or “-” (up to 64 characters), so the ID works in a QR code."
+                      : "Must be unique. Letters, digits, “.”, “_” and “-” only, so it works in a QR code. It cannot be changed later."}
+                  </p>
                 </div>
                 <div className="field">
                   <label htmlFor={modelField}>Model</label>

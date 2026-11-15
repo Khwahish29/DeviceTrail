@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { CONTRACT_ADDRESS } from "../config.js";
 import { ZeroAddress } from "ethers";
-import { isNotFound, readDevice } from "../lib/records.js";
+import { isNotFound, readDevice, readHistory, readInspections, readRepairs } from "../lib/records.js";
+import { useAsync } from "../lib/useAsync.js";
+import CheckReport from "../components/CheckReport.jsx";
+import ShareReport from "../components/ShareReport.jsx";
 import ReportView from "../components/ReportView.jsx";
 import SearchBox from "../components/SearchBox.jsx";
 import { ArrowLeftIcon, Notice, PrintIcon } from "../components/ui.jsx";
@@ -18,6 +21,23 @@ function Skeleton() {
       <div className="report-section"><div className="bar" style={{ width: "100%", height: "var(--sp-6)" }} /></div>
       <div className="report-section"><div className="bar" style={{ width: "45%" }} /></div>
     </div>
+  );
+}
+
+// Each part (repairs, inspections, history) loads on its own, so one slow or failing part never hides the rest.
+function LiveReport({ device, onTech }) {
+  const repairs = useAsync(() => readRepairs(device.id), [device.id], onTech);
+  const inspections = useAsync(() => readInspections(device.id), [device.id], onTech);
+  const history = useAsync(() => readHistory(device.id), [device.id], onTech);
+  return (
+    <ReportView
+      device={device}
+      repairs={repairs}
+      inspections={inspections}
+      history={history}
+      check={<CheckReport deviceId={device.id} inspections={inspections} onTech={onTech} />}
+      share={<ShareReport deviceId={device.id} />}
+    />
   );
 }
 
@@ -54,7 +74,7 @@ export default function DeviceReport({ id, onTech }) {
 
       <div aria-live="polite" aria-busy={state.kind === "loading"}>
         {state.kind === "loading" && <Skeleton />}
-        {state.kind === "found" && <ReportView device={state.device} />}
+        {state.kind === "found" && <LiveReport device={state.device} onTech={onTech} />}
 
         {state.kind === "notfound" && (
           <section className="problem" aria-labelledby="nf-title">

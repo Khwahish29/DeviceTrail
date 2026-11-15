@@ -5,6 +5,7 @@ const LINKS = [
   { href: "#/check", label: "Check a device", match: (r) => r.name === "home" && (!r.target || r.target === "check") },
   { href: "#/how", label: "How it works", match: (r) => r.name === "home" && r.target === "how" },
   { href: "#/partners", label: "For manufacturers", match: (r) => r.name === "partners" },
+  { href: "#/demo", label: "Live demo", match: (r) => r.name === "demo" },
 ];
 
 export default function Header({ route, wallet, connecting, onSignIn, onSignOut }) {
